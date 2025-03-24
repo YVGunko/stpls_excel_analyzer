@@ -29,9 +29,35 @@ def analyze_excel():
     xls = pd.ExcelFile(input_path)
     df = pd.read_excel(xls, sheet_name=xls.sheet_names[0], dtype=str)
     
-    # Copy the first 7 rows as they are
-    df_pre_analysis = df.iloc[:7].copy()
-    
+    header_texts = {"Накладная": "", "Поставщик:": "", "Покупатель:": ""}
+    for row in df.iloc[:7].values:  
+        for i, cell in enumerate(row):
+            if isinstance(cell, str):
+                for key in header_texts:
+                    if key in cell:
+                        if key == "Накладная":
+                            header_texts[key] = cell.strip()
+                        else:
+                            value = ""
+                            for j in range(i + 1, len(row)):  
+                                if isinstance(row[j], str) and row[j].strip():
+                                    value = row[j].strip()
+                                    break  
+                            header_texts[key] = f"{cell.strip()} {value}".strip()
+
+    # **Find footer texts (from last 7 rows)**
+    footer_texts = {"Итого:": "", "НДС:": ""}
+    for row in df.iloc[-8:].values:  # Scan last 7 rows
+        for i, cell in enumerate(row):
+            if isinstance(cell, str):
+                for key in footer_texts:
+                    if key in cell:
+                        value = ""
+                        for j in range(i + 1, len(row)):  
+                            if isinstance(row[j], str) and row[j].strip():
+                                value = row[j].strip()
+                                break  
+                        footer_texts[key] = f"{cell.strip()} {value}".strip()    
     # Identify the correct header row
     header_row_index = 7
     df_headers = pd.read_excel(xls, sheet_name=xls.sheet_names[0], skiprows=header_row_index, nrows=1, dtype=str)
@@ -59,7 +85,7 @@ def analyze_excel():
     current_places = ""
     total_quantity = 0
     total_sum = 0
-    
+    print (results)
     for _, row in df_data.iterrows():
         product_name = " ".join([word.capitalize() for word in trim_product_name(row[product_col]).split()])
 
@@ -69,6 +95,7 @@ def analyze_excel():
         
         if product_name != current_product and current_product:
             results.append([current_order, current_product, current_places, total_quantity, total_sum])
+            print (results)
             current_order = current_order + 1
             total_quantity, total_sum = 0, 0
         
@@ -79,32 +106,44 @@ def analyze_excel():
     if current_product:
         results.append([current_order, current_product, current_places, total_quantity, total_sum])
     
-    # Create output DataFrame
+    # Create output DataFrame (WITHOUT inserting extra rows yet)
     output_df = pd.DataFrame(results, columns=["№", "Товар", "Мест", "Количество", "Сумма"])
-
-    # Save the DataFrame to an Excel file
+    print (output_df)
     output_df.to_excel(output_path, index=False, engine="openpyxl")
 
-    # **Save with basic formatting**
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        output_df.to_excel(writer, index=False, sheet_name="Analysis")
-        workbook = writer.book
-        worksheet = writer.sheets["Analysis"]
+    # Now modify the file with openpyxl
+    wb = load_workbook(output_path)
+    ws = wb.active
 
-        # **Auto-adjust column width**
-        for col_idx, col in enumerate(output_df.columns, start=1):
-            max_length = max(output_df[col].astype(str).map(len).max(), len(col)) + 2
-            worksheet.column_dimensions[worksheet.cell(row=1, column=col_idx).column_letter].width = max_length
+    # **Insert header texts (without shifting the analysis)**
+    ws.insert_rows(1, amount=3)
+    ws["B1"], ws["B2"], ws["B3"] = header_texts["Накладная"], header_texts["Поставщик:"], header_texts["Покупатель:"]
 
+    # **Insert footer texts after last row**
+    footer_row = ws.max_row + 1
+    ws.append([""])  # Empty row before totals
+    print([footer_texts["Итого:"]])
+    ws.append([footer_texts["Итого:"]])  # Corrected from header_texts
+    ws.append([footer_texts["НДС:"]])  # Corrected from header_texts
 
-        # Set header style
-        for cell in worksheet[1]:
-            cell.font = cell.font.copy(bold=True)
+    # **Apply bold styling to headers (corrected row number)**
+    for cell in ws[4]:  # Headers now on row 4
+        cell.font = Font(bold=True)
 
-        # Format numbers
-        for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row, min_col=3, max_col=5):
-            for cell in row:
-                cell.number_format = "#,##0.00"
+    # **Auto-adjust column width**
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        ws.column_dimensions[col_letter].width = max_length + 2
+
+    # Save final result
+    wb.save(output_path)
 
     print(f"Analysis complete. Output saved to {output_path}")
 

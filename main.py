@@ -23,19 +23,20 @@ def analyze_excel():
     # Generate output file name
     output_path = os.path.join(os.path.dirname(input_path), "s_" + os.path.basename(input_path))
     
-    # Load the Excel file
+    # Load the Excel file with original formatting
     xls = pd.ExcelFile(input_path)
-    df = pd.read_excel(xls, sheet_name=xls.sheet_names[0], dtype=str)
+    df = pd.read_excel(xls, sheet_name=xls.sheet_names[0], dtype=str, keep_default_na=False)
     
     # Identify the correct header row
     header_row_index = 7
     df_headers = pd.read_excel(xls, sheet_name=xls.sheet_names[0], skiprows=header_row_index, nrows=1, dtype=str)
     clean_headers = df_headers.iloc[0].fillna("").astype(str).tolist()
-    df = pd.read_excel(xls, sheet_name=xls.sheet_names[0], skiprows=header_row_index + 1, dtype=str)
+    df = pd.read_excel(xls, sheet_name=xls.sheet_names[0], skiprows=header_row_index + 1, dtype=str, keep_default_na=False)
     df.columns = clean_headers
     
-    # Find the first row where analysis should start
+    # Copy all rows before the analysis starts
     first_data_row = df[df.iloc[:, 1] == "1"].index.min()
+    df_pre_analysis = df.iloc[:first_data_row]
     
     # Extract required columns
     product_col = df.columns[df.columns.str.contains("Товар", case=False, na=False)][0]
@@ -53,7 +54,8 @@ def analyze_excel():
     total_sum = 0
     
     for _, row in df_data.iterrows():
-        product_name = trim_product_name(row[product_col]).capitalize()
+        product_name = " ".join([word.capitalize() for word in trim_product_name(row[product_col]).split()])
+        if len (product_name.strip()) == 0 : continue
         quantity = row[quantity_col].split()[0] if pd.notna(row[quantity_col]) else "0"
         total_value = row[total_col] if pd.notna(row[total_col]) else "0"
         
@@ -71,8 +73,11 @@ def analyze_excel():
     # Create output DataFrame
     output_df = pd.DataFrame(results, columns=["Товар", "Количество", "Сумма"])
     
-    # Save the new Excel file
-    output_df.to_excel(output_path, index=False)
+    # Combine original pre-analysis rows with the processed data
+    final_output = pd.concat([df_pre_analysis, output_df], ignore_index=True)
+    
+    # Save the new Excel file with original formatting
+    final_output.to_excel(output_path, index=False)
     print(f"Analysis complete. Output saved to {output_path}")
 
 # Run the function

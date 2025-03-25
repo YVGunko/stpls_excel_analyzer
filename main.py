@@ -6,16 +6,27 @@ from openpyxl.styles import Font, Alignment, Border, Side
 
 # Define a thick top border style
 thick_top_border = Border(top=Side(style="thick"))
+first_table_row = 6
 
 def trim_product_name(product_name):
     if not isinstance(product_name, str) or not product_name.strip():
         return ""
+    
     words = product_name.split()
-    if product_name.lower().startswith("подошва") and len(words) > 3:
-        return " ".join(words[:3])
-    elif product_name.lower().startswith("стелька") and len(words) > 2:
-        return " ".join(words[:2])
-    return product_name
+    
+    if len(words) < 3:
+        return product_name  # No need to adjust if there aren't enough words
+
+    if words[0].upper().startswith("ПОДОШВА") and len(words) > 3:
+        # Check if the second word is not in the list, but the third one is
+        key_words = {"ПУ", "ТЭП", "ЭВА"}
+        if words[1].upper() not in key_words and words[2].upper() in key_words:
+            words[1], words[2] = words[2], words[1]  # Swap second and third words
+        return " ".join(word.capitalize() for word in words[:3])
+    elif words[0].upper().startswith("СТЕЛЬКА") and len(words) > 2:
+        return " ".join(word.capitalize() for word in words[:2])
+    
+    return " ".join([word.capitalize() for word in words])
 
 def convert_xls_to_xlsx(input_path):
     if input_path.endswith(".xls"):
@@ -37,7 +48,7 @@ def convert_xls_to_xlsx(input_path):
 def analyze_excel():
     # Open file dialog to select input Excel file
     Tk().withdraw()  # Hide the root window
-    input_path = filedialog.askopenfilename(title="Select Excel File", filetypes=[("Excel Files", "*.xlsx *.xls")])
+    input_path = filedialog.askopenfilename(title="Выберите файл Excel", filetypes=[("Excel Files", "*.xlsx *.xls")])
     input_path = convert_xls_to_xlsx(input_path)  # Ensure it's .xlsx
     if not input_path:
         print("No file selected. Exiting.")
@@ -98,17 +109,22 @@ def analyze_excel():
     
     # Process relevant rows
     df_data = df.iloc[first_data_row:].reset_index(drop=True)
-    
+    # Apply trimming and reordering for proper grouping
+    df_data[product_col] = df_data[product_col].apply(lambda name: trim_product_name(name))
+
+    # Sort rows by the cleaned "Товар" column (case-insensitive)
+    df_data = df_data.sort_values(by=product_col, key=lambda col: col.str.lower() if col.dtype == "object" else col)
+
     # Group similar product names
     results = []
     current_order = 1
     current_product = ""
-    current_places = ""
+    current_places = "пар."
     total_quantity = 0
     total_sum = 0
     print (results)
     for _, row in df_data.iterrows():
-        product_name = " ".join([word.capitalize() for word in trim_product_name(row[product_col]).split()])
+        product_name = row[product_col]
 
         if len (product_name.strip()) == 0 : continue
         quantity = row[quantity_col].split()[0] if pd.notna(row[quantity_col]) else "0"
@@ -128,7 +144,7 @@ def analyze_excel():
         results.append([current_order, current_product, current_places, total_quantity, total_sum])
     
     # Create output DataFrame (WITHOUT inserting extra rows yet)
-    output_df = pd.DataFrame(results, columns=["№", "Товар", "Мест", "Количество", "Сумма"])
+    output_df = pd.DataFrame(results, columns=["№", "Товар", "Ед.изм.", "Количество", "Сумма"])
     print (output_df)
     output_df.to_excel(output_path, index=False, engine="openpyxl")
 
@@ -147,8 +163,8 @@ def analyze_excel():
         ws[f"{col}{last_row + 1}"].border = thick_top_border
     # Insert SUM formula in the next row for columns 4 and 5
     ws[f"B{last_row + 1}"] = "Итого:"  # Итого
-    ws[f"D{last_row + 1}"] = f"=SUM(D4:D{last_row})"  # Количество
-    ws[f"E{last_row + 1}"] = f"=SUM(E4:E{last_row})"  # Сумма
+    ws[f"D{last_row + 1}"] = f"=SUM(D{first_table_row}:D{last_row})"  # Количество
+    ws[f"E{last_row + 1}"] = f"=SUM(E{first_table_row}:E{last_row})"  # Сумма
 
     # Apply number formatting to match the table
     ws[f"D{last_row + 1}"].number_format = "#,##0.00"
@@ -164,7 +180,7 @@ def analyze_excel():
         cell.font = Font(bold=True)
 
     # Apply number format to "Количество" and "Сумма" columns
-    for row in ws.iter_rows(min_row=5, max_row=ws.max_row, min_col=4, max_col=5):  # Columns D & E
+    for row in ws.iter_rows(min_row=first_table_row, max_row=ws.max_row, min_col=4, max_col=5):  # Columns D & E
         for cell in row:
             cell.number_format = "#,##0.00"
 

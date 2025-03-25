@@ -2,7 +2,10 @@ import pandas as pd
 import os
 from tkinter import Tk, filedialog
 from openpyxl import load_workbook
-from openpyxl.styles import Font, Alignment
+from openpyxl.styles import Font, Alignment, Border, Side
+
+# Define a thick top border style
+thick_top_border = Border(top=Side(style="thick"))
 
 def trim_product_name(product_name):
     if not isinstance(product_name, str) or not product_name.strip():
@@ -14,10 +17,28 @@ def trim_product_name(product_name):
         return " ".join(words[:2])
     return product_name
 
+def convert_xls_to_xlsx(input_path):
+    if input_path.endswith(".xls"):
+        output_path = input_path + "x"  # Change ".xls" to ".xlsx"
+        
+        # Load old .xls file
+        xls = pd.ExcelFile(input_path)
+        
+        # Save as new .xlsx file
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            for sheet_name in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=sheet_name, dtype=str)
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        
+        print(f"Converted {input_path} → {output_path}")
+        return output_path  # Return new .xlsx path
+    return input_path  # If already .xlsx, return as is
+
 def analyze_excel():
     # Open file dialog to select input Excel file
     Tk().withdraw()  # Hide the root window
-    input_path = filedialog.askopenfilename(title="Select Excel File", filetypes=[("Excel Files", "*.xlsx")])
+    input_path = filedialog.askopenfilename(title="Select Excel File", filetypes=[("Excel Files", "*.xlsx *.xls")])
+    input_path = convert_xls_to_xlsx(input_path)  # Ensure it's .xlsx
     if not input_path:
         print("No file selected. Exiting.")
         return
@@ -116,19 +137,36 @@ def analyze_excel():
     ws = wb.active
 
     # **Insert header texts (without shifting the analysis)**
-    ws.insert_rows(1, amount=3)
+    ws.insert_rows(1, amount=4)
     ws["B1"], ws["B2"], ws["B3"] = header_texts["Накладная"], header_texts["Поставщик:"], header_texts["Покупатель:"]
 
-    # **Insert footer texts after last row**
-    footer_row = ws.max_row + 1
-    ws.append([""])  # Empty row before totals
-    print([footer_texts["Итого:"]])
-    ws.append([footer_texts["Итого:"]])  # Corrected from header_texts
-    ws.append([footer_texts["НДС:"]])  # Corrected from header_texts
+    # Determine the last row with data
+    last_row = ws.max_row
+    # Apply thick top border to all columns in the summary row
+    for col in ["B", "C", "D", "E"]:  # Columns from "№" to "Сумма"
+        ws[f"{col}{last_row + 1}"].border = thick_top_border
+    # Insert SUM formula in the next row for columns 4 and 5
+    ws[f"B{last_row + 1}"] = "Итого:"  # Итого
+    ws[f"D{last_row + 1}"] = f"=SUM(D4:D{last_row})"  # Количество
+    ws[f"E{last_row + 1}"] = f"=SUM(E4:E{last_row})"  # Сумма
+
+    # Apply number formatting to match the table
+    ws[f"D{last_row + 1}"].number_format = "#,##0.00"
+    ws[f"E{last_row + 1}"].number_format = "#,##0.00"
+
+    # **Insert footer texts into column B**
+    footer_row = ws.max_row + 2  # Leave an empty row before footer
+    ws[f"B{footer_row}"] = footer_texts["Итого:"]
+    ws[f"B{footer_row + 1}"] = footer_texts["НДС:"]
 
     # **Apply bold styling to headers (corrected row number)**
     for cell in ws[4]:  # Headers now on row 4
         cell.font = Font(bold=True)
+
+    # Apply number format to "Количество" and "Сумма" columns
+    for row in ws.iter_rows(min_row=5, max_row=ws.max_row, min_col=4, max_col=5):  # Columns D & E
+        for cell in row:
+            cell.number_format = "#,##0.00"
 
     # **Auto-adjust column width**
     for col in ws.columns:
@@ -141,6 +179,8 @@ def analyze_excel():
             except:
                 pass
         ws.column_dimensions[col_letter].width = max_length + 2
+
+
 
     # Save final result
     wb.save(output_path)
